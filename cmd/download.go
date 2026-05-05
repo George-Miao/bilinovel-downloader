@@ -23,16 +23,6 @@ var downloadCmd = &cobra.Command{
 	Short: "Download a novel or volume",
 	Long:  "Download a novel or volume",
 	Run: func(cmd *cobra.Command, args []string) {
-		// slog.Info("Installing playwright")
-		// err := playwright.Install(&playwright.RunOptions{
-		// 	Browsers: []string{"chromium"},
-		// 	Stdout:   io.Discard,
-		// })
-		// if err != nil {
-		// 	slog.Error("failed to install playwright")
-		// 	return
-		// }
-
 		slog.Info("Downloading novel")
 
 		err := runDownloadNovel()

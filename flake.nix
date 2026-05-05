@@ -10,15 +10,16 @@
       pkgs = nixpkgs.legacyPackages."${system}";
       inherit (pkgs) lib;
       version = self.shortRev or self.dirtyShortRev or "dev";
+      browsers = pkgs.playwright-driver.browsers;
+      chromiumLibPath = lib.makeLibraryPath pkgs.playwright-driver.components.chromium-headless-shell.buildInputs;
 
       chromiumExecutable =
         let
-          browsers = pkgs.playwright-driver.browsers;
           dirs = builtins.readDir browsers;
-          chromiumDir = lib.findFirst
-            (name: lib.hasPrefix "chromium_headless_shell-" name)
-            (throw "No chromium_headless_shell directory found in playwright browsers")
-            (builtins.attrNames dirs);
+          chromiumDir =
+            lib.findFirst (name: lib.hasPrefix "chromium_headless_shell-" name)
+              (throw "No chromium_headless_shell directory found in playwright browsers")
+              (builtins.attrNames dirs);
         in
         "${browsers}/${chromiumDir}/chrome-headless-shell-linux64/chrome-headless-shell";
     in
@@ -39,38 +40,29 @@
               "bilinovel-downloader/cmd.Version=${version}"
             ];
           };
-
-          server = pkgs.writeShellApplication {
-            name = "bilinovel-downloader-server";
-            runtimeInputs = [
-              bilinovel-downloader
-            ];
-            text = ''
-              export PLAYWRIGHT_MCP_EXECUTABLE_PATH="${chromiumExecutable}"
-
-              exec bilinovel-downloader server
-            '';
-          };
-        in
-        {
-          default = bilinovel-downloader;
-          inherit bilinovel-downloader server;
-
-          docker = pkgs.dockerTools.buildLayeredImage {
+          bilinovel-downloader-docker = pkgs.dockerTools.buildLayeredImage {
             name = "bilinovel-downloader";
             tag = version;
+            extraCommands = ''
+              mkdir -p tmp
+              chmod 1777 tmp
+            '';
             contents = [
-              server
               pkgs.cacert
-              pkgs.playwright-driver.browsers
+              pkgs.nodejs
+              browsers
             ];
             config = {
-              Cmd = [ "${server}/bin/bilinovel-downloader-server" ];
+              Cmd = [
+                "${bilinovel-downloader}/bin/bilinovel-downloader"
+                "server"
+              ];
               Env = [
                 "DOWNLOAD_DIR=/downloads"
-                "AUX_DIR=/aux"
-                "CLEAN_AUX_FILES=false"
                 "SERVER_ADDR=:8080"
+                "LD_LIBRARY_PATH=${chromiumLibPath}"
+                "PLAYWRIGHT_EXECUTABLE_PATH=${chromiumExecutable}"
+                "PLAYWRIGHT_NODEJS_PATH=${pkgs.nodejs}/bin/node"
               ];
               ExposedPorts = {
                 "8080/tcp" = { };
@@ -81,6 +73,10 @@
               };
             };
           };
+        in
+        {
+          default = bilinovel-downloader;
+          inherit bilinovel-downloader bilinovel-downloader-docker;
         };
 
       devShells.${system}.default =
@@ -95,7 +91,8 @@
           ];
 
           shellHook = ''
-            export PLAYWRIGHT_MCP_EXECUTABLE_PATH=${chromiumExecutable}
+            export LD_LIBRARY_PATH=${chromiumLibPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+            export PLAYWRIGHT_EXECUTABLE_PATH=${chromiumExecutable}
           '';
         };
     };

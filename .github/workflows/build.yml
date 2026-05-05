@@ -37,7 +37,7 @@ jobs:
 
       - name: Build and Push Docker image
         run: |
-          nix build ".#docker"
+          nix build ".#bilinovel-downloader-docker"
           SHA_SHORT=$(echo ${{ github.sha }} | cut -c1-7)
           IMAGE="${{ env.REGISTRY }}/george-miao/bilinovel-downloader"
           nix-shell -p skopeo --command "skopeo --insecure-policy copy docker-archive:$(readlink -f ./result) docker://$IMAGE:$SHA_SHORT --dest-compress-format zstd"
