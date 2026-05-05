@@ -101,10 +101,17 @@ func (b *Bilinovel) initBrowser(debug bool) error {
 		return fmt.Errorf("could not start playwright: %w", err)
 	}
 
-	b.browser, err = pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
+	executablePath := os.Getenv("PLAYWRIGHT_MCP_EXECUTABLE_PATH")
+
+	launchOptions := playwright.BrowserTypeLaunchOptions{
 		Headless: playwright.Bool(!debug),
 		Devtools: playwright.Bool(debug),
-	})
+	}
+	if executablePath != "" {
+		launchOptions.ExecutablePath = playwright.String(executablePath)
+	}
+
+	b.browser, err = pw.Chromium.Launch(launchOptions)
 	if err != nil {
 		return fmt.Errorf("could not launch browser: %w", err)
 	}
@@ -327,8 +334,6 @@ func (b *Bilinovel) getAllVolumes(novelId int, skipChapterContent bool, skipVolu
 				b.logger.Error("failed to get volume info", slog.Int("novelId", novelId), slog.Int("volumeId", volumeId), slog.Any("error", err))
 				return
 			}
-			volume.SeriesIdx = i
-
 			// 关闭浏览器标签页
 			pwPageKey := fmt.Sprintf("%v-%v", novelId, volumeId)
 			if pwPage, ok := b.pages[pwPageKey]; ok {
@@ -606,21 +611,21 @@ func (b *Bilinovel) processContentWithPlaywright(page playwright.Page, htmlConte
 			if (!acontent) {
 				return 'acontent element not found';
 			}
-			
+
 			let removedCount = 0;
 			const elements = acontent.querySelectorAll('*');
-			
+
 			// 从后往前遍历，避免删除元素时影响索引
 			for (let i = elements.length - 1; i >= 0; i--) {
 				const element = elements[i];
 				const computedStyle = window.getComputedStyle(element);
-				
+
 				if (computedStyle.display === 'none' || computedStyle.transform == 'matrix(0, 0, 0, 0, 0, 0)') {
 					element.remove();
 					removedCount++;
 				}
 			}
-			
+
 			return 'Removed ' + removedCount + ' hidden elements';
 		})()
 	`)
