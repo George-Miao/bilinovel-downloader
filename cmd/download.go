@@ -25,7 +25,6 @@ var downloadCmd = &cobra.Command{
 	Long:  "Download a novel or volume",
 	Run: func(cmd *cobra.Command, args []string) {
 
-
 		slog.Info("Downloading novel")
 
 		err := runDownloadNovel()

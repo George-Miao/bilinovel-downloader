@@ -96,6 +96,12 @@ func (b *Bilinovel) GetExtraFiles() []model.ExtraFile {
 
 // initBrowser 初始化浏览器实例
 func (b *Bilinovel) initBrowser(debug bool) error {
+	if err := playwright.Install(&playwright.RunOptions{
+		SkipInstallBrowsers: true,
+	}); err != nil {
+		return fmt.Errorf("could not install playwright driver: %w", err)
+	}
+
 	pw, err := playwright.Run()
 	if err != nil {
 		return fmt.Errorf("could not start playwright: %w", err)
