@@ -18,12 +18,39 @@ import (
 	"github.com/google/uuid"
 )
 
+type PackVolumeOptions struct {
+	OutputPath string
+	AuxPath    string
+	CleanAux   bool
+	StyleCSS   string
+	ExtraFiles []model.ExtraFile
+}
+
 func PackVolumeToEpub(volume *model.Volume, outputPath string, styleCSS string, extraFiles []model.ExtraFile) error {
-	outputPath = filepath.Join(outputPath, utils.CleanDirName(volume.Title))
-	_, err := os.Stat(outputPath)
+	return PackVolumeToEpubWithOptions(volume, PackVolumeOptions{
+		OutputPath: outputPath,
+		AuxPath:    outputPath,
+		StyleCSS:   styleCSS,
+		ExtraFiles: extraFiles,
+	})
+}
+
+func PackVolumeToEpubWithOptions(volume *model.Volume, options PackVolumeOptions) error {
+	if options.AuxPath == "" {
+		options.AuxPath = options.OutputPath
+	}
+
+	err := os.MkdirAll(options.OutputPath, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to create epub output directory: %v", err)
+	}
+
+	stagingPath := filepath.Join(options.AuxPath, utils.CleanDirName(volume.Title))
+
+	_, err = os.Stat(stagingPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			err = os.MkdirAll(outputPath, 0755)
+			err = os.MkdirAll(stagingPath, 0755)
 			if err != nil {
 				return fmt.Errorf("failed to create output directory: %v", err)
 			}
@@ -31,11 +58,11 @@ func PackVolumeToEpub(volume *model.Volume, outputPath string, styleCSS string, 
 			return fmt.Errorf("failed to get output directory: %v", err)
 		}
 	} else {
-		err = os.RemoveAll(outputPath)
+		err = os.RemoveAll(stagingPath)
 		if err != nil {
 			return fmt.Errorf("failed to remove output directory: %v", err)
 		}
-		err = os.MkdirAll(outputPath, 0755)
+		err = os.MkdirAll(stagingPath, 0755)
 		if err != nil {
 			return fmt.Errorf("failed to create output directory: %v", err)
 		}
@@ -47,7 +74,7 @@ func PackVolumeToEpub(volume *model.Volume, outputPath string, styleCSS string, 
 		imageNames := make([]string, 0)
 		for imgName, imgData := range chapter.Content.Images {
 			imageNames = append(imageNames, imgName)
-			imgPath := filepath.Join(outputPath, fmt.Sprintf("OEBPS/Images/chapter-%03v/%s", i, imgName))
+			imgPath := filepath.Join(stagingPath, fmt.Sprintf("OEBPS/Images/chapter-%03v/%s", i, imgName))
 			err := os.MkdirAll(filepath.Dir(imgPath), 0755)
 			if err != nil {
 				return fmt.Errorf("failed to create image directory: %v", err)
@@ -57,7 +84,7 @@ func PackVolumeToEpub(volume *model.Volume, outputPath string, styleCSS string, 
 				return fmt.Errorf("failed to write image: %v", err)
 			}
 		}
-		chapterPath := filepath.Join(outputPath, fmt.Sprintf("OEBPS/Text/chapter-%03v.xhtml", i))
+		chapterPath := filepath.Join(stagingPath, fmt.Sprintf("OEBPS/Text/chapter-%03v.xhtml", i))
 		err = os.MkdirAll(filepath.Dir(chapterPath), 0755)
 		if err != nil {
 			return fmt.Errorf("failed to create chapter directory: %v", err)
@@ -78,14 +105,14 @@ func PackVolumeToEpub(volume *model.Volume, outputPath string, styleCSS string, 
 	}
 
 	// 将 Cover 写入
-	coverPath := filepath.Join(outputPath, fmt.Sprintf("cover%s", filepath.Ext(volume.CoverUrl)))
+	coverPath := filepath.Join(stagingPath, fmt.Sprintf("cover%s", filepath.Ext(volume.CoverUrl)))
 	err = os.WriteFile(coverPath, volume.Cover, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write cover: %v", err)
 	}
 
 	// 将 CoverXHTML 写入 OEBPS/Text/cover.xhtml
-	coverXHTMLPath := filepath.Join(outputPath, "OEBPS/Text/cover.xhtml")
+	coverXHTMLPath := filepath.Join(stagingPath, "OEBPS/Text/cover.xhtml")
 	file, err := os.Create(coverXHTMLPath)
 	if err != nil {
 		return fmt.Errorf("failed to create cover XHTML file: %v", err)
@@ -97,7 +124,7 @@ func PackVolumeToEpub(volume *model.Volume, outputPath string, styleCSS string, 
 	}
 
 	// OEBPS/Text/contents.xhtml 目录
-	contentsXHTMLPath := filepath.Join(outputPath, "OEBPS/Text/contents.xhtml")
+	contentsXHTMLPath := filepath.Join(stagingPath, "OEBPS/Text/contents.xhtml")
 	file, err = os.Create(contentsXHTMLPath)
 	if err != nil {
 		return fmt.Errorf("failed to create contents XHTML file: %v", err)
@@ -117,7 +144,7 @@ func PackVolumeToEpub(volume *model.Volume, outputPath string, styleCSS string, 
 	}
 
 	// ContainerXML
-	containerPath := filepath.Join(outputPath, "META-INF/container.xml")
+	containerPath := filepath.Join(stagingPath, "META-INF/container.xml")
 	err = os.MkdirAll(filepath.Dir(containerPath), 0755)
 	if err != nil {
 		return fmt.Errorf("failed to create container directory: %v", err)
@@ -134,21 +161,21 @@ func PackVolumeToEpub(volume *model.Volume, outputPath string, styleCSS string, 
 
 	// ContentOPF
 	u := uuid.New()
-	err = CreateContentOPF(outputPath, u.String(), volume, extraFiles)
+	err = CreateContentOPF(stagingPath, u.String(), volume, options.ExtraFiles)
 	if err != nil {
 		return fmt.Errorf("failed to create content OPF: %v", err)
 	}
 
 	// 写入 CSS
-	cssPath := filepath.Join(outputPath, "style.css")
-	err = os.WriteFile(cssPath, []byte(styleCSS), 0644)
+	cssPath := filepath.Join(stagingPath, "style.css")
+	err = os.WriteFile(cssPath, []byte(options.StyleCSS), 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write CSS: %v", err)
 	}
 
 	// 写入 extraFiles
-	for _, file := range extraFiles {
-		extraFilePath := filepath.Join(outputPath, file.Path)
+	for _, file := range options.ExtraFiles {
+		extraFilePath := filepath.Join(stagingPath, file.Path)
 		err = os.WriteFile(extraFilePath, file.Data, 0644)
 		if err != nil {
 			return fmt.Errorf("failed to write extra file: %v", err)
@@ -156,9 +183,16 @@ func PackVolumeToEpub(volume *model.Volume, outputPath string, styleCSS string, 
 	}
 
 	// 打包成 epub 文件
-	err = PackEpub(outputPath)
+	epubPath := filepath.Join(options.OutputPath, utils.CleanDirName(volume.Title)+".epub")
+	err = PackEpubToFile(stagingPath, epubPath)
 	if err != nil {
 		return fmt.Errorf("failed to pack epub: %v", err)
+	}
+	if options.CleanAux {
+		err = os.RemoveAll(stagingPath)
+		if err != nil {
+			return fmt.Errorf("failed to remove epub staging directory: %v", err)
+		}
 	}
 	return nil
 }
@@ -286,6 +320,10 @@ func CreateContentOPF(outputPath string, uuid string, volume *model.Volume, extr
 
 func PackEpub(dirPath string) error {
 	savePath := strings.TrimSuffix(dirPath, string(filepath.Separator)) + ".epub"
+	return PackEpubToFile(dirPath, savePath)
+}
+
+func PackEpubToFile(dirPath string, savePath string) error {
 	zipFile, err := os.Create(savePath)
 	if err != nil {
 		return err
