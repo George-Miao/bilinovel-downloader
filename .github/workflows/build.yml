@@ -1,0 +1,44 @@
+name: Build & Publish
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.go"
+      - /go.*
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Setup Nix Magic Cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Docker image
+        run: |
+          nix build ".#docker"
+          SHA_SHORT=$(echo ${{ github.sha }} | cut -c1-7)
+          IMAGE="${{ env.REGISTRY }}/george-miao/bilinovel-downloader"
+          nix-shell -p skopeo --command "skopeo --insecure-policy copy docker-archive:$(readlink -f ./result) docker://$IMAGE:$SHA_SHORT --dest-compress-format zstd"
+          nix-shell -p skopeo --command "skopeo --insecure-policy copy docker-archive:$(readlink -f ./result) docker://$IMAGE:latest --dest-compress-format zstd"
