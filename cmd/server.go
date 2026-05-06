@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -168,6 +169,20 @@ func (m *jobManager) getJob(jobID string) (*downloadJob, bool) {
 	return cloneJob(job), true
 }
 
+func (m *jobManager) listJobs() []*downloadJob {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	jobs := make([]*downloadJob, 0, len(m.jobs))
+	for _, job := range m.jobs {
+		jobs = append(jobs, cloneJob(job))
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].CreatedAt.After(jobs[j].CreatedAt)
+	})
+	return jobs
+}
+
 func (m *jobManager) cancelJob(jobID string) (*downloadJob, bool, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -298,6 +313,15 @@ func newDownloadServer(config serverConfig, manager *jobManager) http.Handler {
 			Status: "queued",
 			JobID:  job.ID,
 		})
+	})
+
+	mux.HandleFunc("/job", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			writeServerError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		writeServerJSON(w, http.StatusOK, manager.listJobs())
 	})
 
 	mux.HandleFunc("/job/", func(w http.ResponseWriter, r *http.Request) {

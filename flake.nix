@@ -10,18 +10,9 @@
       pkgs = nixpkgs.legacyPackages."${system}";
       inherit (pkgs) lib;
       version = self.shortRev or self.dirtyShortRev or "dev";
-      browsers = pkgs.playwright-driver.browsers;
-      chromiumLibPath = lib.makeLibraryPath pkgs.playwright-driver.components.chromium-headless-shell.buildInputs;
-
-      chromiumExecutable =
-        let
-          dirs = builtins.readDir browsers;
-          chromiumDir =
-            lib.findFirst (name: lib.hasPrefix "chromium_headless_shell-" name)
-              (throw "No chromium_headless_shell directory found in playwright browsers")
-              (builtins.attrNames dirs);
-        in
-        "${browsers}/${chromiumDir}/chrome-headless-shell-linux64/chrome-headless-shell";
+      chromiumHeadlessShell = pkgs.playwright-driver.components.chromium-headless-shell;
+      chromiumLibPath = lib.makeLibraryPath chromiumHeadlessShell.buildInputs;
+      chromiumExecutable = "${chromiumHeadlessShell}/chrome-headless-shell-linux64/chrome-headless-shell";
     in
     {
       packages.${system} =
@@ -50,7 +41,7 @@
             contents = [
               pkgs.cacert
               pkgs.nodejs
-              browsers
+              chromiumHeadlessShell
             ];
             config = {
               Cmd = [
@@ -87,7 +78,7 @@
           ];
 
           nativeBuildInputs = [
-            playwright-driver.browsers
+            chromiumHeadlessShell
           ];
 
           shellHook = ''
