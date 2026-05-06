@@ -30,19 +30,30 @@
    DOWNLOAD_DIR=/downloads bilinovel-downloader server
    ```
 
+   HTTP 接口：
+   - `GET /` 内置的单页网页前端，可添加任务、查看任务列表与状态、停止任务
    - `GET/POST /download/{novel_id}` 创建整本小说下载任务，返回 `202` 和 `job_id`
    - `GET/POST /download/{novel_id}/{vol_id}` 创建单卷下载任务，返回 `202` 和 `job_id`
    - 小说不存在时返回 `400 {"status":"error","message":"novel not found"}`
+   - `GET /job` 列出所有任务（按创建时间倒序）
    - `GET /job/{job_id}` 查询任务状态
    - `DELETE /job/{job_id}` 取消排队中或运行中的任务
 
    服务配置：
    - `DOWNLOAD_DIR`：最终 EPUB 输出目录，默认 `./novels`（相对于服务进程当前工作目录）；Docker 镜像默认 `DOWNLOAD_DIR=/downloads`
-   - `PLAYWRIGHT_MCP_EXECUTABLE_PATH`：Playwright 浏览器可执行文件路径，默认不设置，由 Playwright 自行解析
    - `AUX_DIR`：JSON 缓存、图片、EPUB 临时展开目录等辅助文件目录，默认与 `DOWNLOAD_DIR` 相同；Docker 镜像默认 `AUX_DIR=/aux`
    - `CLEAN_AUX_FILES`：EPUB 生成成功后删除辅助文件，默认 `false`
    - `SERVER_ADDR`：监听地址，默认 `:8080`
+   - `PLAYWRIGHT_EXECUTABLE_PATH`：Playwright 浏览器可执行文件路径，默认不设置，由 Playwright 自行解析（旧名 `PLAYWRIGHT_MCP_EXECUTABLE_PATH` 仍向后兼容）
+   - `PLAYWRIGHT_DRIVER_PATH`：Playwright 驱动目录，默认放在 `~/.cache/ms-playwright-go/`；首次启动会自动下载驱动到该目录
+   - `PLAYWRIGHT_NODEJS_PATH`：覆盖驱动使用的 Node.js 二进制（容器内已通过 Nix 自带的 `node` 设置）
    - EPUB 输出到 `$DOWNLOAD_DIR/$NOVEL_TITLE/$VOLUME.epub`
+
+   Docker 镜像（`nix build .#bilinovel-downloader-docker`）已经预先打包好 chromium-headless-shell、Node.js 以及对应的 `LD_LIBRARY_PATH`，开箱即用：
+
+   ```bash
+   docker run --rm -p 8080:8080 -v $PWD/downloads:/downloads bilinovel-downloader:<tag>
+   ```
 
 4. 对自动生成的 epub 格式不满意可以自行修改后使用命令打包
 

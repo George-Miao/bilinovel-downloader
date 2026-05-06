@@ -4,6 +4,7 @@ import (
 	"bilinovel-downloader/utils"
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -28,6 +29,9 @@ const (
 
 	jobQueueSize = 128
 )
+
+//go:embed index.html
+var indexHTML []byte
 
 type serverConfig struct {
 	Addr          string
@@ -54,14 +58,16 @@ const (
 )
 
 type downloadJob struct {
-	ID        string    `json:"id"`
-	Status    jobStatus `json:"status"`
-	NovelID   int       `json:"novel_id"`
-	VolumeID  int       `json:"volume_id,omitempty"`
-	Error     string    `json:"error,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	StartedAt time.Time `json:"started_at,omitempty"`
-	EndedAt   *time.Time `json:"ended_at"`
+	ID          string     `json:"id"`
+	Status      jobStatus  `json:"status"`
+	NovelID     int        `json:"novel_id"`
+	NovelTitle  string     `json:"novel_title,omitempty"`
+	VolumeID    int        `json:"volume_id,omitempty"`
+	VolumeTitle string     `json:"volume_title,omitempty"`
+	Error       string     `json:"error,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	StartedAt   *time.Time `json:"started_at"`
+	EndedAt     *time.Time `json:"ended_at"`
 
 	cancel context.CancelFunc
 }
@@ -130,14 +136,16 @@ func newJobManager(config serverConfig) *jobManager {
 	return manager
 }
 
-func (m *jobManager) createJob(novelID int, volumeID int) (*downloadJob, bool) {
+func (m *jobManager) createJob(novelID int, volumeID int, novelTitle string, volumeTitle string) (*downloadJob, bool) {
 	job := &downloadJob{
-		ID:        uuid.NewString(),
-		Status:    jobStatusQueued,
-		NovelID:   novelID,
-		VolumeID:  volumeID,
-		CreatedAt: time.Now().UTC(),
-		cancel:    func() {},
+		ID:          uuid.NewString(),
+		Status:      jobStatusQueued,
+		NovelID:     novelID,
+		NovelTitle:  novelTitle,
+		VolumeID:    volumeID,
+		VolumeTitle: volumeTitle,
+		CreatedAt:   time.Now().UTC(),
+		cancel:      func() {},
 	}
 
 	m.mu.Lock()
@@ -223,7 +231,8 @@ func (m *jobManager) runJob(job *downloadJob) {
 		return
 	}
 	job.Status = jobStatusRunning
-	job.StartedAt = time.Now().UTC()
+	startedAt := time.Now().UTC()
+	job.StartedAt = &startedAt
 	job.cancel = cancel
 	m.mu.Unlock()
 
@@ -266,19 +275,35 @@ func (m *jobManager) snapshotJob(job *downloadJob) *downloadJob {
 
 func cloneJob(job *downloadJob) *downloadJob {
 	return &downloadJob{
-		ID:        job.ID,
-		Status:    job.Status,
-		NovelID:   job.NovelID,
-		VolumeID:  job.VolumeID,
-		Error:     job.Error,
-		CreatedAt: job.CreatedAt,
-		StartedAt: job.StartedAt,
-		EndedAt:   job.EndedAt,
+		ID:          job.ID,
+		Status:      job.Status,
+		NovelID:     job.NovelID,
+		NovelTitle:  job.NovelTitle,
+		VolumeID:    job.VolumeID,
+		VolumeTitle: job.VolumeTitle,
+		Error:       job.Error,
+		CreatedAt:   job.CreatedAt,
+		StartedAt:   job.StartedAt,
+		EndedAt:     job.EndedAt,
 	}
 }
 
 func newDownloadServer(config serverConfig, manager *jobManager) http.Handler {
 	mux := http.NewServeMux()
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			writeServerError(w, http.StatusNotFound, "not found")
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			writeServerError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(indexHTML)
+	})
 
 	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost && r.Method != http.MethodGet {
@@ -293,17 +318,30 @@ func newDownloadServer(config serverConfig, manager *jobManager) http.Handler {
 			return
 		}
 
-		exists, err := novelExists(r.Context(), novelID)
+		novelTitle, err := fetchNovelTitle(r.Context(), novelID)
 		if err != nil {
 			writeServerError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		if !exists {
+		if novelTitle == "" {
 			writeServerError(w, http.StatusBadRequest, "novel not found")
 			return
 		}
 
-		job, ok := manager.createJob(novelID, volumeID)
+		var volumeTitle string
+		if volumeID != 0 {
+			volumeTitle, err = fetchVolumeTitle(r.Context(), novelID, volumeID)
+			if err != nil {
+				writeServerError(w, http.StatusBadGateway, err.Error())
+				return
+			}
+			if volumeTitle == "" {
+				writeServerError(w, http.StatusBadRequest, "volume not found")
+				return
+			}
+		}
+
+		job, ok := manager.createJob(novelID, volumeID, novelTitle, volumeTitle)
 		if !ok {
 			writeServerError(w, http.StatusServiceUnavailable, job.Error)
 			return
@@ -392,28 +430,36 @@ func parseJobPath(path string) (string, error) {
 	return parts[1], nil
 }
 
-func novelExists(ctx context.Context, novelID int) (bool, error) {
+func fetchNovelTitle(ctx context.Context, novelID int) (string, error) {
+	return fetchBilinovelTitle(ctx, fmt.Sprintf("https://www.bilinovel.com/novel/%d.html", novelID))
+}
+
+func fetchVolumeTitle(ctx context.Context, novelID, volumeID int) (string, error) {
+	return fetchBilinovelTitle(ctx, fmt.Sprintf("https://www.bilinovel.com/novel/%d/vol_%d.html", novelID, volumeID))
+}
+
+func fetchBilinovelTitle(ctx context.Context, url string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	resp, err := utils.NewRestyClient(1).R().
 		SetContext(ctx).
-		Get(fmt.Sprintf("https://www.bilinovel.com/novel/%d.html", novelID))
+		Get(url)
 	if err != nil {
-		return false, fmt.Errorf("failed to validate novel: %w", err)
+		return "", fmt.Errorf("failed to fetch %s: %w", url, err)
 	}
 
 	switch resp.StatusCode() {
 	case http.StatusOK:
 		doc, err := goquery.NewDocumentFromReader(bytes.NewReader(resp.Body()))
 		if err != nil {
-			return false, fmt.Errorf("failed to parse novel validation response: %w", err)
+			return "", fmt.Errorf("failed to parse %s: %w", url, err)
 		}
-		return strings.TrimSpace(doc.Find(".book-title").First().Text()) != "", nil
+		return strings.TrimSpace(doc.Find(".book-title").First().Text()), nil
 	case http.StatusNotFound:
-		return false, nil
+		return "", nil
 	default:
-		return false, fmt.Errorf("failed to validate novel: %s", resp.Status())
+		return "", fmt.Errorf("failed to fetch %s: %s", url, resp.Status())
 	}
 }
 

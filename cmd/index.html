@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>bilinovel-downloader</title>
+<style>
+:root { color-scheme: light dark; --fg: #1a1a1a; --bg: #fafafa; --mut: #6b6b6b; --acc: #2563eb; --bd: #d4d4d4; --row: #fff; --err: #c0392b; --ok: #16a34a; --warn: #b45309; }
+@media (prefers-color-scheme: dark) { :root { --fg: #e5e5e5; --bg: #161616; --mut: #9a9a9a; --acc: #60a5fa; --bd: #2e2e2e; --row: #1f1f1f; } }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 1.5rem; font: 14px/1.45 system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+h1 { font-size: 1.1rem; margin: 0 0 1rem; }
+form { display: flex; gap: .5rem; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; }
+input, button { font: inherit; padding: .45rem .65rem; border: 1px solid var(--bd); border-radius: 4px; background: var(--row); color: var(--fg); }
+button { cursor: pointer; }
+button.primary { background: var(--acc); color: #fff; border-color: transparent; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.tablewrap { width: 100%; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--bd); vertical-align: middle; white-space: nowrap; }
+th { font-weight: 600; color: var(--mut); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+tr.row { background: var(--row); }
+.id { font-family: ui-monospace, monospace; color: var(--mut); font-size: 12px; }
+.status { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+.s-queued { background: #e5e7eb; color: #374151; }
+.s-running { background: #dbeafe; color: #1e40af; }
+.s-succeeded { background: #d1fae5; color: #065f46; }
+.s-failed { background: #fee2e2; color: #991b1b; }
+.s-canceling, .s-canceled { background: #fef3c7; color: #92400e; }
+.err { display: inline-block; vertical-align: middle; color: var(--err); font-size: 12px; max-width: 24rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.muted { color: var(--mut); }
+.empty { color: var(--mut); padding: 2rem; text-align: center; }
+.banner { padding: .5rem .75rem; background: #fee2e2; color: #991b1b; border-radius: 4px; margin-bottom: 1rem; display: none; }
+.banner.show { display: block; }
+</style>
+</head>
+<body>
+<h1>bilinovel-downloader</h1>
+
+<div id="banner" class="banner"></div>
+
+<form id="add">
+  <input id="novel" type="number" min="1" placeholder="novel id" required style="width: 8em">
+  <input id="volume" type="number" min="1" placeholder="volume id (optional)" style="width: 14em">
+  <button class="primary" type="submit">Add</button>
+  <span class="muted" id="hint"></span>
+</form>
+
+<div class="tablewrap">
+<table>
+  <thead><tr><th>ID</th><th>Novel</th><th>Status</th><th>Created</th><th>Duration</th><th>Error</th><th></th></tr></thead>
+  <tbody id="jobs"><tr><td colspan="7" class="empty">No jobs yet.</td></tr></tbody>
+</table>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const banner = $("banner");
+const showErr = (msg) => { banner.textContent = msg; banner.classList.add("show"); setTimeout(() => banner.classList.remove("show"), 4000); };
+
+const fmtTime = (s) => s ? new Date(s).toLocaleString() : "—";
+const fmtDur = (j) => {
+  if (!j.started_at) return "—";
+  const end = j.ended_at ? new Date(j.ended_at) : new Date();
+  const ms = end - new Date(j.started_at);
+  if (ms < 1000) return ms + "ms";
+  if (ms < 60000) return (ms / 1000).toFixed(1) + "s";
+  const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000);
+  return m + "m" + s + "s";
+};
+const cancelable = (s) => s === "queued" || s === "running";
+
+async function refresh() {
+  try {
+    const r = await fetch("/job");
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    render(await r.json());
+  } catch (e) { showErr("List failed: " + e.message); }
+}
+
+function render(jobs) {
+  const tbody = $("jobs");
+  if (!jobs.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">No jobs yet.</td></tr>'; return; }
+  tbody.innerHTML = jobs.map(j => `
+    <tr class="row">
+      <td><span class="id">${j.id.slice(0, 8)}</span></td>
+      <td>
+        <div>${j.novel_title ? `${j.novel_title} <span class="muted">(#${j.novel_id})</span>` : `#${j.novel_id}`}</div>
+        ${j.volume_id ? `<div class="muted">${j.volume_title ? `${j.volume_title} (vol #${j.volume_id})` : `vol #${j.volume_id}`}</div>` : ""}
+      </td>
+      <td><span class="status s-${j.status}">${j.status}</span></td>
+      <td class="muted">${fmtTime(j.created_at)}</td>
+      <td class="muted">${fmtDur(j)}</td>
+      <td>${j.error ? `<span class="err" title="${j.error.replace(/"/g, "&quot;")}">${j.error}</span>` : ""}</td>
+      <td>${cancelable(j.status) ? `<button data-id="${j.id}" class="cancel">Stop</button>` : ""}</td>
+    </tr>`).join("");
+  tbody.querySelectorAll("button.cancel").forEach(b => b.addEventListener("click", () => stop(b.dataset.id)));
+}
+
+async function stop(id) {
+  try {
+    const r = await fetch("/job/" + id, { method: "DELETE" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    refresh();
+  } catch (e) { showErr("Stop failed: " + e.message); }
+}
+
+$("add").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const novel = $("novel").value.trim();
+  const volume = $("volume").value.trim();
+  if (!novel) return;
+  const path = "/download/" + novel + (volume ? "/" + volume : "");
+  $("hint").textContent = "submitting…";
+  try {
+    const r = await fetch(path, { method: "POST" });
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.message || ("HTTP " + r.status));
+    $("novel").value = ""; $("volume").value = "";
+    $("hint").textContent = "queued " + body.job_id.slice(0, 8);
+    refresh();
+  } catch (e) { showErr("Add failed: " + e.message); $("hint").textContent = ""; }
+});
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
