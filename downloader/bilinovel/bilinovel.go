@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"fmt"
+	"html"
 	"log/slog"
 	"net/http"
 	"os"
@@ -433,7 +434,7 @@ func (b *Bilinovel) getChapterByPage(pwPage playwright.Page, chapter *model.Chap
 	html := resp.Body()
 
 	// 解决乱序问题
-	resortedHtml, err := b.processContentWithPlaywright(pwPage, string(html))
+	resortedHtml, err := b.processContentWithPlaywright(pwPage, string(html), Url)
 	if err != nil {
 		return false, fmt.Errorf("failed to process html: %w", err)
 	}
@@ -547,13 +548,11 @@ func (b *Bilinovel) getImg(url string) ([]byte, error) {
 }
 
 // processContentWithPlaywright 使用复用的浏览器实例处理内容
-func (b *Bilinovel) processContentWithPlaywright(page playwright.Page, htmlContent string) (string, error) {
+func (b *Bilinovel) processContentWithPlaywright(page playwright.Page, htmlContent, sourceURL string) (string, error) {
+	// Resolve root-relative scripts against the chapter URL, not the local file.
+	htmlContent = strings.Replace(htmlContent, "<head>", `<head><base href="`+html.EscapeString(sourceURL)+`">`, 1)
 	// 替换 window.location.replace，防止页面跳转
 	htmlContent = strings.ReplaceAll(htmlContent, "window.location.replace", "console.log")
-
-	// 将绝对路径的资源引用替换为完整 URL，以便从 file:// 加载时能正确请求远程资源
-	htmlContent = strings.ReplaceAll(htmlContent, `src="/`, `src="https://www.bilinovel.com/`)
-	htmlContent = strings.ReplaceAll(htmlContent, `href="/`, `href="https://www.bilinovel.com/`)
 
 	tempPath := filepath.Join(os.TempDir(), "bilinovel-downloader")
 	err := os.MkdirAll(tempPath, 0755)
@@ -613,7 +612,7 @@ func (b *Bilinovel) processContentWithPlaywright(page playwright.Page, htmlConte
 		Timeout: playwright.Float(10000),
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to wait for network request finish")
+		return "", fmt.Errorf("failed to wait for network request finish: %w", err)
 	}
 
 	err = page.Locator("#acontent").WaitFor(playwright.LocatorWaitForOptions{

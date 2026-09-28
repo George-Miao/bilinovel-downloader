@@ -2,11 +2,66 @@ package bilinovel
 
 import (
 	"bilinovel-downloader/model"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/mxschmitt/playwright-go"
 )
+
+func TestProcessContentWithRelativeScript(t *testing.T) {
+	if os.Getenv("BILINOVEL_RUN_INTEGRATION_TESTS") != "1" {
+		t.Skip("set BILINOVEL_RUN_INTEGRATION_TESTS=1 to run browser integration tests")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/themes/zhmb/js/chapterlog.js" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript")
+		_, _ = w.Write([]byte(`document.querySelector("#acontent").textContent = "ready";`))
+	}))
+	defer server.Close()
+
+	if err := playwright.Install(&playwright.RunOptions{SkipInstallBrowsers: true}); err != nil {
+		t.Fatal(err)
+	}
+	pw, err := playwright.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pw.Stop()
+
+	options := playwright.BrowserTypeLaunchOptions{Headless: playwright.Bool(true)}
+	if executable := os.Getenv("PLAYWRIGHT_EXECUTABLE_PATH"); executable != "" {
+		options.ExecutablePath = playwright.String(executable)
+	}
+	browser, err := pw.Chromium.Launch(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer browser.Close()
+	page, err := browser.NewPage()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sourceURL := server.URL + "/novel/2013/165899_1.html"
+	content := `<html><head></head><body><div id="acontent">loading</div>` +
+		`<script src="/themes/zhmb/js/chapterlog.js"></script></body></html>`
+	result, err := (&Bilinovel{logger: slog.Default()}).processContentWithPlaywright(page, content, sourceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, `<div id="acontent">ready</div>`) {
+		t.Fatalf("relative chapter script did not process content: %s (source %s)", result, sourceURL)
+	}
+}
 
 func TestCleanChapterContentRemovesAdvertisementContainers(t *testing.T) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`
