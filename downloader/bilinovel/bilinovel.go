@@ -19,7 +19,6 @@ import (
 	"strings"
 	"sync"
 
-	mapper "git.nite07.com/nite/font-mapper"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/mxschmitt/playwright-go"
 )
@@ -31,7 +30,7 @@ var readTTF []byte
 var miLantingTTF []byte
 
 type Bilinovel struct {
-	fontMapper  *mapper.GlyphOutlineMapper
+	fontMapper  *glyphMapper
 	textOnly    bool
 	restyClient *utils.RestyClient
 
@@ -51,7 +50,7 @@ type BilinovelNewOption struct {
 }
 
 func New(option BilinovelNewOption) (*Bilinovel, error) {
-	fontMapper, err := mapper.NewGlyphOutlineMapper(readTTF, miLantingTTF)
+	fontMapper, err := newGlyphMapper(readTTF, miLantingTTF)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create font mapper: %v", err)
 	}
@@ -467,7 +466,7 @@ func (b *Bilinovel) getChapterByPage(pwPage playwright.Page, chapter *model.Chap
 		}
 		builder := strings.Builder{}
 		for _, r := range html {
-			_, newRune, ok := b.fontMapper.MappingRune(r)
+			newRune, ok := b.fontMapper.mapRune(r)
 			if ok {
 				builder.WriteRune(newRune)
 			}

@@ -22,7 +22,7 @@
             inherit version;
 
             src = lib.cleanSource self;
-            vendorHash = "sha256-M/59RtblC4u11IDf9bkA8ZQfa5QT9up3n4d9xNQCkIY=";
+            vendorHash = "sha256-ggJy3afjgbp6STsFxVyi8ylu4TL3e+PiTIUI7s2dSEg=";
 
             ldflags = [
               "-s"
